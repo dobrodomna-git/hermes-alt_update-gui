@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign=None,
     icon=None,
+    manifest="app.manifest",   # system DPI aware: crisp UI on 2k/4k scaling
 )

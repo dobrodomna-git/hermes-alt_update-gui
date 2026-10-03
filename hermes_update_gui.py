@@ -17,7 +17,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 BG = "#101418"
 PANEL = "#171c22"
@@ -171,6 +171,46 @@ STAGES = [
 
 MAX_LOG_LINES = 2000
 LANG_FILE = "hermes-alt-update-gui.lang"
+
+
+def _init_dpi():
+    """Make the process DPI-aware (Windows) and return the system scale factor.
+    Called once at import time, before any Tk window exists. Without this a
+    DPI-unaware Tk window is bitmap-stretched by Windows on 2k/4k displays
+    (blurry). With it we scale geometry and fonts by the Windows scale factor
+    ourselves, so the UI stays crisp and correctly sized at 100-300%."""
+    scale = 1.0
+    if os.name == "nt":
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # system DPI aware
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+        dpi = 0
+        try:
+            dpi = ctypes.windll.user32.GetDpiForSystem()
+        except Exception:
+            try:
+                hdc = ctypes.windll.user32.GetDC(0)
+                dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+                ctypes.windll.user32.ReleaseDC(0, hdc)
+            except Exception:
+                dpi = 0
+        if dpi:
+            scale = min(3.0, max(1.0, dpi / 96.0))
+    # manual override for testing or odd drivers: HERMES_UPDATE_GUI_SCALE=1.5
+    try:
+        ov = float(os.environ.get("HERMES_UPDATE_GUI_SCALE", "") or 0)
+        if ov > 0:
+            scale = min(3.0, max(0.5, ov))
+    except ValueError:
+        pass
+    return scale
+
+
+DPI_SCALE = _init_dpi()
 
 
 def classify(low):
@@ -336,9 +376,11 @@ class HermesUpdateGUI:
         self.last_line_time = None
         self.spin_idx = 0
         self.banner_state = None  # (color, title_key, detail_args) for re-render
+        self.s = DPI_SCALE
 
         self._build_ui()
         self.log_gui(self.T("g_start") % self.log_path)
+        self.log_gui("[gui] dpi scale: %.2f" % self.s)
         self.root.after(50, self._poll)
         self.root.after(1000, self._tick)
         if self.check_only or self.mock_path:
@@ -347,6 +389,16 @@ class HermesUpdateGUI:
     # ------------------------------------------------------------- i18n ------
     def T(self, key):
         return I18N[self.lang][key]
+
+    def px(self, v):
+        return max(1, int(round(v * self.s)))
+
+    def fnt(self, size, weight=""):
+        size = max(7, int(round(size * self.s)))
+        return ("Segoe UI", size, weight) if weight else ("Segoe UI", size)
+
+    def mono(self, size):
+        return ("Consolas", max(7, int(round(size * self.s))))
 
     def stage_name(self, idx):
         return STAGES[idx]["name"][self.lang]
@@ -378,7 +430,10 @@ class HermesUpdateGUI:
     def _build_ui(self):
         self.root = tk.Tk()
         self.root.title(self.T("title") % VERSION)
-        self.root.geometry("880x620")
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        self.root.geometry("%dx%d" % (min(self.px(880), sw - 40),
+                                      min(self.px(620), sh - 60)))
         self.root.configure(bg=BG)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -389,7 +444,8 @@ class HermesUpdateGUI:
             pass
         style.configure("Dark.Horizontal.TProgressbar", troughcolor=BORDER,
                         background=ACCENT, bordercolor=BORDER,
-                        lightcolor=ACCENT, darkcolor=ACCENT, thickness=14)
+                        lightcolor=ACCENT, darkcolor=ACCENT,
+                        thickness=self.px(14))
 
         header = tk.Frame(self.root, bg=PANEL, highlightbackground=BORDER,
                           highlightthickness=1)
@@ -397,33 +453,34 @@ class HermesUpdateGUI:
         self.lang_btn = tk.Button(header, text=self.T("lang_button"),
                                   command=self.toggle_language, bg=PANEL, fg=ACCENT,
                                   activebackground=ACCENT, activeforeground=BG,
-                                  font=("Segoe UI", 9, "bold"), relief="flat",
-                                  width=4, padx=6, pady=2)
-        self.lang_btn.pack(side="right", padx=(6, 12))
-        self.stage_header = tk.Label(header, text=self.T("waiting"), bg=PANEL, fg=ACCENT,
-                                     font=("Segoe UI", 14, "bold"), anchor="w")
-        self.stage_header.pack(side="left", padx=12, pady=8)
-        self.timer_label = tk.Label(header, text=self.T("time") % (0, 0), bg=PANEL, fg=GRAY,
-                                    font=("Segoe UI", 10))
-        self.timer_label.pack(side="right", padx=12)
+                                  font=self.fnt(9, "bold"), relief="flat",
+                                  width=4, padx=self.px(6), pady=self.px(2))
+        self.lang_btn.pack(side="right", padx=(self.px(6), self.px(12)))
+        self.stage_header = tk.Label(header, text=self.T("waiting"), bg=PANEL,
+                                     fg=ACCENT, font=self.fnt(14, "bold"), anchor="w")
+        self.stage_header.pack(side="left", padx=self.px(12), pady=self.px(8))
+        self.timer_label = tk.Label(header, text=self.T("time") % (0, 0), bg=PANEL,
+                                    fg=GRAY, font=self.fnt(10))
+        self.timer_label.pack(side="right", padx=self.px(12))
 
         prow = tk.Frame(self.root, bg=BG)
-        prow.grid(row=1, column=0, sticky="we", padx=10, pady=(8, 2))
+        prow.grid(row=1, column=0, sticky="we", padx=self.px(10),
+                  pady=(self.px(8), self.px(2)))
         self.progressbar = ttk.Progressbar(prow, style="Dark.Horizontal.TProgressbar",
                                            orient="horizontal", mode="determinate",
                                            maximum=100)
         self.progressbar.pack(side="left", fill="x", expand=True)
         self.percent_label = tk.Label(prow, text="0%", bg=BG, fg=FG,
-                                      font=("Segoe UI", 10, "bold"), width=5)
-        self.percent_label.pack(side="right", padx=6)
+                                      font=self.fnt(10, "bold"), width=5)
+        self.percent_label.pack(side="right", padx=self.px(6))
 
         crow = tk.Frame(self.root, bg=BG)
-        crow.grid(row=2, column=0, sticky="we", padx=10)
+        crow.grid(row=2, column=0, sticky="we", padx=self.px(10))
         self.counters_label = tk.Label(crow, text=self.T("counters") % (0, 0, 0),
-                                       bg=BG, fg=GRAY, font=("Segoe UI", 9), anchor="w")
+                                       bg=BG, fg=GRAY, font=self.fnt(9), anchor="w")
         self.counters_label.pack(side="left")
         self.idle_label = tk.Label(crow, text="", bg=BG, fg=WARNING,
-                                   font=("Segoe UI", 9), anchor="e")
+                                   font=self.fnt(9), anchor="e")
 
         main = tk.Frame(self.root, bg=BG)
         main.grid(row=3, column=0, sticky="nsew")
@@ -432,30 +489,33 @@ class HermesUpdateGUI:
         main.columnconfigure(1, weight=1)
         main.rowconfigure(0, weight=1)
 
-        left = tk.Frame(main, bg=PANEL, width=300, highlightbackground=BORDER,
-                        highlightthickness=1)
-        left.grid(row=0, column=0, sticky="ns", padx=(10, 5), pady=5)
+        left = tk.Frame(main, bg=PANEL, width=self.px(300),
+                        highlightbackground=BORDER, highlightthickness=1)
+        left.grid(row=0, column=0, sticky="ns", padx=(self.px(10), self.px(5)),
+                  pady=self.px(5))
         left.grid_propagate(False)
         left.columnconfigure(0, weight=1)
         self.stage_rows = []
         for i, st in enumerate(STAGES):
             row = tk.Frame(left, bg=PANEL)
-            row.grid(row=i, column=0, sticky="we", padx=8, pady=4)
+            row.grid(row=i, column=0, sticky="we", padx=self.px(8), pady=self.px(4))
             row.columnconfigure(1, weight=1)
             icon = tk.Label(row, text=self.T("pending_word"), width=10, anchor="w",
-                            bg=PANEL, fg=GRAY, font=("Segoe UI", 9))
+                            bg=PANEL, fg=GRAY, font=self.fnt(9))
             icon.grid(row=0, column=0, sticky="w")
             name = tk.Label(row, text="%d. %s" % (i + 1, self.stage_name(i)),
-                            anchor="w", bg=PANEL, fg=FG, font=("Segoe UI", 10))
+                            anchor="w", bg=PANEL, fg=FG, font=self.fnt(10))
             name.grid(row=0, column=1, sticky="we")
             self.stage_rows.append((row, icon, name))
 
-        right = tk.Frame(main, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
-        right.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=5)
+        right = tk.Frame(main, bg=PANEL, highlightbackground=BORDER,
+                         highlightthickness=1)
+        right.grid(row=0, column=1, sticky="nsew",
+                   padx=(self.px(5), self.px(10)), pady=self.px(5))
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
         self.log_widget = tk.Text(right, bg="#0c1014", fg=FG, insertbackground=FG,
-                                  font=("Consolas", 9), wrap="char", state="disabled",
+                                  font=self.mono(9), wrap="char", state="disabled",
                                   relief="flat", borderwidth=0)
         self.log_widget.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(right, orient="vertical", command=self.log_widget.yview)
@@ -464,50 +524,54 @@ class HermesUpdateGUI:
         style.configure("Dark.Vertical.TScrollbar", background="#3a4350",
                         troughcolor="#12161b", bordercolor=BORDER,
                         lightcolor="#4a5566", darkcolor="#2a323d",
-                        arrowsize=12, relief="flat")
+                        arrowsize=self.px(12), relief="flat")
         sb.configure(style="Dark.Vertical.TScrollbar")
         self.log_widget.configure(yscrollcommand=sb.set)
         self.log_widget.tag_configure("err", foreground=ERROR)
         self.log_widget.tag_configure("gui", foreground=ACCENT)
 
         self.start_frame = tk.Frame(self.root, bg=BG)
-        self.start_frame.grid(row=4, column=0, sticky="we", pady=10)
-        big_font = ("Segoe UI", 12, "bold")
+        self.start_frame.grid(row=4, column=0, sticky="we", pady=self.px(10))
         self.start_btn = tk.Button(self.start_frame, text=self.T("start"),
                                    command=self.start, bg=PANEL, fg=FG,
                                    activebackground=ACCENT, activeforeground=BG,
-                                   font=big_font, relief="flat", padx=24, pady=10)
-        self.start_btn.pack(side="left", padx=(10, 6))
+                                   font=self.fnt(12, "bold"), relief="flat",
+                                   padx=self.px(24), pady=self.px(10))
+        self.start_btn.pack(side="left", padx=(self.px(10), self.px(6)))
         self.check_btn = tk.Button(self.start_frame, text=self.T("check"),
                                    command=self.start_check, bg=PANEL, fg=FG,
                                    activebackground=ACCENT, activeforeground=BG,
-                                   font=("Segoe UI", 11), relief="flat", padx=16, pady=10)
-        self.check_btn.pack(side="left", padx=6)
+                                   font=self.fnt(11), relief="flat",
+                                   padx=self.px(16), pady=self.px(10))
+        self.check_btn.pack(side="left", padx=self.px(6))
 
         self.banner_frame = tk.Frame(self.root, bg=PANEL, highlightbackground=BORDER,
                                      highlightthickness=1)
         self.banner_title = tk.Label(self.banner_frame, text="", bg=PANEL, fg=FG,
-                                     font=("Segoe UI", 13, "bold"), anchor="w")
-        self.banner_title.pack(fill="x", padx=12, pady=(8, 2))
+                                     font=self.fnt(13, "bold"), anchor="w")
+        self.banner_title.pack(fill="x", padx=self.px(12),
+                               pady=(self.px(8), self.px(2)))
         self.banner_detail = tk.Label(self.banner_frame, text="", bg=PANEL, fg=FG,
-                                      font=("Segoe UI", 9), anchor="w", justify="left",
-                                      wraplength=820)
-        self.banner_detail.pack(fill="x", padx=12, pady=(0, 8))
+                                      font=self.fnt(9), anchor="w", justify="left",
+                                      wraplength=self.px(820))
+        self.banner_detail.pack(fill="x", padx=self.px(12), pady=(0, self.px(8)))
 
         btns = tk.Frame(self.root, bg=BG)
-        btns.grid(row=5, column=0, sticky="we", padx=10, pady=(4, 10))
+        btns.grid(row=5, column=0, sticky="we", padx=self.px(10),
+                  pady=(self.px(4), self.px(10)))
         self.cancel_btn = tk.Button(btns, text=self.T("cancel"), command=self.cancel,
                                     bg=PANEL, fg=WARNING, activebackground=WARNING,
-                                    activeforeground=BG, font=("Segoe UI", 10),
-                                    relief="flat", padx=16, pady=6)
+                                    activeforeground=BG, font=self.fnt(10),
+                                    relief="flat", padx=self.px(16), pady=self.px(6))
         self.open_log_btn = tk.Button(btns, text=self.T("open_log"), command=self.open_log,
                                       bg=PANEL, fg=FG, activebackground=ACCENT,
-                                      activeforeground=BG, font=("Segoe UI", 10),
-                                      relief="flat", padx=16, pady=6)
+                                      activeforeground=BG, font=self.fnt(10),
+                                      relief="flat", padx=self.px(16), pady=self.px(6))
         self.open_dir_btn = tk.Button(btns, text=self.T("open_dir"),
                                       command=self.open_hermes_dir, bg=PANEL, fg=FG,
                                       activebackground=ACCENT, activeforeground=BG,
-                                      font=("Segoe UI", 10), relief="flat", padx=16, pady=6)
+                                      font=self.fnt(10), relief="flat",
+                                      padx=self.px(16), pady=self.px(6))
         self.cancel_btn.pack(side="left")
 
     def start_check(self):
@@ -858,21 +922,28 @@ class HermesUpdateGUI:
 
 def show_already_running(lang):
     lang = lang if lang in I18N else detect_language()
+    s = DPI_SCALE
+    def px(v):
+        return max(1, int(round(v * s)))
+    def fnt(size, weight=""):
+        size = max(7, int(round(size * s)))
+        return ("Segoe UI", size, weight) if weight else ("Segoe UI", size)
     r = tk.Tk()
     r.title(I18N[lang]["lock_title"])
-    r.geometry("440x150")
+    sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+    r.geometry("%dx%d" % (min(px(440), sw - 40), min(px(150), sh - 60)))
     r.configure(bg=BG)
     bar = tk.Frame(r, bg=BG)
-    bar.pack(fill="x", padx=12, pady=(10, 0))
+    bar.pack(fill="x", padx=px(12), pady=(px(10), 0))
     tk.Button(bar, text=I18N[lang]["lang_button"],
               command=lambda: _swap_lock(r, lang),
               bg=PANEL, fg=ACCENT, activebackground=ACCENT, activeforeground=BG,
-              font=("Segoe UI", 9, "bold"), relief="flat", width=4, padx=6, pady=2
+              font=fnt(9, "bold"), relief="flat", width=4, padx=px(6), pady=px(2)
               ).pack(side="right")
-    tk.Label(r, text=I18N[lang]["lock_1"], bg=BG, fg=FG,
-             font=("Segoe UI", 11)).pack(padx=16, pady=(14, 4))
-    tk.Label(r, text=I18N[lang]["lock_2"], bg=BG, fg=GRAY,
-             font=("Segoe UI", 10)).pack(padx=16, pady=(0, 14))
+    tk.Label(r, text=I18N[lang]["lock_1"], bg=BG, fg=FG, font=fnt(11)).pack(
+        padx=px(16), pady=(px(14), px(4)))
+    tk.Label(r, text=I18N[lang]["lock_2"], bg=BG, fg=GRAY, font=fnt(10)).pack(
+        padx=px(16), pady=(0, px(14)))
     r.mainloop()
 
 
