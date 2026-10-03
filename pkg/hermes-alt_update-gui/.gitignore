@@ -1,7 +1,0 @@
-build/
-dist/
-.venv/
-__pycache__/
-*.spec.bak
-*.egg-info/
-*.zip
