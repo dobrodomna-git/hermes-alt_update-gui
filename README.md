@@ -54,6 +54,18 @@ PR [#128380](https://github.com/NousResearch/hermes-agent/pull/128380).
   sized. No manual tuning needed; override with `HERMES_UPDATE_GUI_SCALE=1.5`
   if a particular driver misreports DPI.
 
+## Запуск в одном окне и масштабирование
+
+- **Одно окно:** запускайте `HermesAltUpdateGUI.exe` (или ярлык на рабочем
+  столе «Hermes Update (ALT)»). Апдейтер работает внутри GUI-окна — его панель
+  журнала и есть «терминал». Запуск через `.bat` всегда показывает короткое
+  консольное окно (так Windows ведёт себя с любым `.bat`); ярлык запускает exe
+  напрямую — лишнего окна нет.
+- **Дисплеи 2K/4K:** приложение DPI-aware и масштабирует разметку и шрифты по
+  коэффициенту масштаба Windows (100–300%) — интерфейс остаётся чётким и
+  корректного размера. Ручная настройка не нужна; при капризном драйвере можно
+  задать `HERMES_UPDATE_GUI_SCALE=1.5`.
+
 ## How it works / Механизм работы
 
 1. **Find Hermes** — checks `HERMES_HOME`, `%LOCALAPPDATA%\hermes\hermes-agent`,
